@@ -1,7 +1,7 @@
 import sys
 import pathlib
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[2]))
-from sl_inference_only_muDMalpha.mock_generator.mock_generator import run_mock_simulation
+from sl_inference_4Dinfer_todele.mock_generator.mock_generator import run_mock_simulation
 
 
 def test_run_mock_simulation_zero_density():

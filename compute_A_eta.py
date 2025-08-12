@@ -35,7 +35,7 @@ from tqdm import tqdm
 from .config import SCATTER
 from .mock_generator.lens_model import LensModel
 from .mock_generator.lens_solver import solve_single_lens
-from .mock_generator.mass_sampler import MODEL_PARAMS, generate_samples
+from .mock_generator.mass_sampler import generate_samples
 from .utils import selection_function
 
 # -----------------------------------------------------------------------------
@@ -152,11 +152,13 @@ def ms_distribution(ms_grid: np.ndarray, alpha_s: float = -1.3, ms_star: float =
 
 
 def build_eta_grid():
-    """Return default grids for ``mu_DM`` and ``alpha``."""
+    """Return default grids for ``mu_DM``, ``beta_DM``, ``sigma_DM`` and ``alpha``."""
 
-    mu_DM_grid = np.linspace(12.5, 13.5, 100)
-    alpha_grid = np.linspace(0.0, 0.5, 100)
-    return mu_DM_grid, alpha_grid
+    mu_DM_grid = np.linspace(12.5, 13.5, 20)
+    beta_DM_grid = np.linspace(1.5, 2.5, 20)
+    sigma_DM_grid = np.linspace(0.2, 0.4, 20)
+    alpha_grid = np.linspace(0.0, 0.5, 20)
+    return mu_DM_grid, beta_DM_grid, sigma_DM_grid, alpha_grid
 
 
 def compute_A_eta(
@@ -178,13 +180,15 @@ def compute_A_eta(
     ms_grid = np.linspace(20.0, 30.0, ms_points)
     p_ms = ms_distribution(ms_grid)
 
-    mu_DM_grid, alpha_grid = build_eta_grid()
-    A_accum = np.zeros((mu_DM_grid.size, alpha_grid.size))
-
-    # Parameters of the halo mass relation
-    model_p = MODEL_PARAMS["deVauc"]
-    beta_DM = model_p["beta_h"]
-    sigma_DM = model_p["sigma_h"]
+    mu_DM_grid, beta_DM_grid, sigma_DM_grid, alpha_grid = build_eta_grid()
+    A_accum = np.zeros(
+        (
+            mu_DM_grid.size,
+            beta_DM_grid.size,
+            sigma_DM_grid.size,
+            alpha_grid.size,
+        )
+    )
 
     for j, alpha in enumerate(tqdm(alpha_grid, desc="alpha loop")):
         # Mstar used in lensing is Msps + alpha
@@ -228,24 +232,35 @@ def compute_A_eta(
         # Combined static weight per Monte Carlo sample
         w_static = T1 * T2
 
-        # ---- T3: halo-mass relation for each muDM ----
+        # ---- T3: halo-mass relation for each (muDM, betaDM, sigmaDM) ----
         for logM_sps_i, logMh_i, w_i in zip(
             samples["logM_star_sps"], samples["logMh"], w_static
         ):
             if not (np.isfinite(w_i) and w_i > 0):
                 continue
 
-            mean = mu_DM_grid + beta_DM * (logM_sps_i - 11.4)
-            p_Mh = norm.pdf(logMh_i, loc=mean, scale=sigma_DM)
-            A_accum[:, j] += w_i * p_Mh
+            mean = (
+                mu_DM_grid[:, None] + beta_DM_grid[None, :] * (logM_sps_i - 11.4)
+            )
+            for k, sigma in enumerate(sigma_DM_grid):
+                p_Mh = norm.pdf(logMh_i, loc=mean, scale=sigma)
+                A_accum[:, :, k, j] += w_i * p_Mh
 
     Mh_range = samples["logMh_max"] - samples["logMh_min"]
     A = Mh_range * A_accum / n_samples
     A = np.maximum(np.nan_to_num(A, nan=0.0, posinf=0.0, neginf=0.0), 1e-300)
 
-    mu_flat, alpha_flat = np.meshgrid(mu_DM_grid, alpha_grid, indexing="ij")
+    mu_flat, beta_flat, sigma_flat, alpha_flat = np.meshgrid(
+        mu_DM_grid, beta_DM_grid, sigma_DM_grid, alpha_grid, indexing="ij"
+    )
     df = pd.DataFrame(
-        {"mu_DM": mu_flat.ravel(), "alpha": alpha_flat.ravel(), "A": A.ravel()}
+        {
+            "mu_DM": mu_flat.ravel(),
+            "beta_DM": beta_flat.ravel(),
+            "sigma_DM": sigma_flat.ravel(),
+            "alpha": alpha_flat.ravel(),
+            "A": A.ravel(),
+        }
     )
     path = os.path.join(os.path.dirname(__file__), "A_eta_table_alpha.csv")
     df.to_csv(path, index=False)
