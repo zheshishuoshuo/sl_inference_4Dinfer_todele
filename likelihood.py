@@ -12,10 +12,8 @@ from .make_tabulate import LensGrid, tabulate_likelihood_grids
 from .mock_generator.mass_sampler import MODEL_PARAMS
 from .config import SCATTER
 
-# Parameters describing the halo-mass relation used in the mock generator
+# Parameters describing the galaxy population used in the mock generator
 MODEL_P = MODEL_PARAMS["deVauc"]
-BETA_DM = MODEL_P["beta_h"]
-SIGMA_DM = MODEL_P["sigma_h"]
 
 # Convenience wrapper ---------------------------------------------------------
 
@@ -43,10 +41,15 @@ def precompute_grids(
 # Priors ---------------------------------------------------------------------
 
 def log_prior(theta: Sequence[float]) -> float:
-    """Flat prior on ``(muDM, alpha)`` within broad bounds."""
+    """Flat prior on ``(muDM, betaDM, sigmaDM, alpha)`` within broad bounds."""
 
-    muDM, alpha = theta
-    if not (10.0 < muDM < 16.0 and -0.5 < alpha < 1.0):
+    muDM, betaDM, sigmaDM, alpha = theta
+    if not (
+        10.0 < muDM < 16.0
+        and 0.0 < betaDM < 5.0
+        and 0.0 < sigmaDM < 2.0
+        and -0.5 < alpha < 1.0
+    ):
         return -np.inf
     return 0.0
 
@@ -60,7 +63,7 @@ def _single_lens_likelihood(
 ) -> float:
     """Evaluate the likelihood contribution of one lens."""
 
-    muDM, alpha = theta
+    muDM, betaDM, sigmaDM, alpha = theta
 
     mask = np.isfinite(grid.logM_star) & np.isfinite(grid.sample_factor)
     if not np.any(mask):
@@ -75,8 +78,8 @@ def _single_lens_likelihood(
     # Halo mass conditional on stellar mass
     p_logMh = norm.pdf(
         logMh,
-        loc=muDM + BETA_DM * (Msps - 11.4),
-        scale=SIGMA_DM,
+        loc=muDM + betaDM * (Msps - 11.4),
+        scale=sigmaDM,
     )
 
     scatter_Mstar = SCATTER.star
@@ -116,10 +119,10 @@ def log_likelihood(
 ) -> float:
     """Joint log-likelihood for all lenses."""
 
-    muDM, alpha = theta
+    muDM, betaDM, sigmaDM, alpha = theta
 
     try:
-        A_eta = cached_A_interp(muDM, alpha)
+        A_eta = cached_A_interp(muDM, betaDM, sigmaDM, alpha)
         if not np.isfinite(A_eta) or A_eta <= 0:
             return -np.inf
     except Exception:
